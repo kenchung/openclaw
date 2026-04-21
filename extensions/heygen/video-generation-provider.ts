@@ -18,36 +18,66 @@ import type {
 } from "openclaw/plugin-sdk/video-generation";
 
 const DEFAULT_HEYGEN_BASE_URL = "https://api.heygen.com";
-const DEFAULT_HEYGEN_MODEL = "avatar_iv";
+const DEFAULT_HEYGEN_MODEL = "video_agent_v3";
 const DEFAULT_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 5_000;
-const MAX_POLL_ATTEMPTS = 120;
+const MAX_POLL_ATTEMPTS = 240;
 const MAX_DURATION_SECONDS = 120;
+const MAX_FILE_ATTACHMENTS = 20;
 
-const HEYGEN_ASPECT_RATIOS = ["16:9", "9:16", "1:1"] as const;
-type HeyGenOrientation = "landscape" | "portrait" | "square";
+const HEYGEN_ASPECT_RATIOS = ["16:9", "9:16"] as const;
+type HeyGenOrientation = "landscape" | "portrait";
 
-type HeyGenVideoGenerateResponse = {
+type SessionStatus =
+  | "thinking"
+  | "waiting_for_input"
+  | "reviewing"
+  | "generating"
+  | "completed"
+  | "failed";
+
+type VideoFileStatus = "pending" | "processing" | "completed" | "failed";
+
+type CreateSessionResponse = {
   error?: { code?: string | number; message?: string } | null;
   data?: {
-    video_id?: string;
+    session_id?: string;
+    status?: SessionStatus;
+    video_id?: string | null;
+    created_at?: number;
   };
 };
 
-type HeyGenVideoStatus = "pending" | "processing" | "completed" | "failed" | "waiting";
+type GetSessionResponse = {
+  error?: { code?: string | number; message?: string } | null;
+  data?: {
+    session_id?: string;
+    status?: SessionStatus;
+    progress?: number;
+    title?: string | null;
+    video_id?: string | null;
+    created_at?: number;
+    messages?: unknown[];
+  };
+};
 
-type HeyGenVideoStatusResponse = {
+type GetVideoResponse = {
   error?: { code?: string | number; message?: string } | null;
   data?: {
     id?: string;
-    status?: HeyGenVideoStatus;
-    video_url?: string;
-    thumbnail_url?: string;
-    duration?: number;
-    error?: { code?: string | number; message?: string } | null;
-    callback_id?: string | null;
+    status?: VideoFileStatus;
+    video_url?: string | null;
+    thumbnail_url?: string | null;
+    duration?: number | null;
+    failure_code?: string | null;
+    failure_message?: string | null;
   };
 };
+
+type HeyGenFileAttachment =
+  | { type: "url"; url: string }
+  | { type: "asset_id"; asset_id: string }
+  | { type: "base64"; media_type: string; data: string };
 
 function resolveHeyGenBaseUrl(req: VideoGenerationRequest): string {
   return (
@@ -55,18 +85,19 @@ function resolveHeyGenBaseUrl(req: VideoGenerationRequest): string {
   );
 }
 
-function aspectRatioToOrientation(aspectRatio: string | undefined): HeyGenOrientation {
-  switch (normalizeOptionalString(aspectRatio)) {
+function aspectRatioToOrientation(aspectRatio: string | undefined): HeyGenOrientation | undefined {
+  const ar = normalizeOptionalString(aspectRatio);
+  if (!ar) {
+    return undefined;
+  }
+  switch (ar) {
     case "16:9":
-    case undefined:
       return "landscape";
     case "9:16":
       return "portrait";
-    case "1:1":
-      return "square";
     default:
       throw new Error(
-        `HeyGen video generation does not support aspect ratio ${aspectRatio}. Supported: ${HEYGEN_ASPECT_RATIOS.join(", ")}.`,
+        `HeyGen video generation does not support aspect ratio ${ar}. Supported: ${HEYGEN_ASPECT_RATIOS.join(", ")}.`,
       );
   }
 }
@@ -79,189 +110,237 @@ function resolveProviderOption(opts: Record<string, unknown>, key: string): stri
   return normalizeOptionalString(raw);
 }
 
-function resolveImageAsset(
+function resolveOrientation(
   req: VideoGenerationRequest,
-): { type: "url"; url: string } | { type: "buffer"; dataUrl: string } | undefined {
-  const image = req.inputImages?.[0];
-  if (!image) {
-    return undefined;
+  opts: Record<string, unknown>,
+): HeyGenOrientation | undefined {
+  const explicit = resolveProviderOption(opts, "orientation");
+  if (explicit === "landscape" || explicit === "portrait") {
+    return explicit;
   }
-  const url = normalizeOptionalString(image.url);
-  if (url) {
-    return { type: "url", url };
-  }
-  if (!image.buffer) {
-    throw new Error("HeyGen image-to-video input is missing image data.");
-  }
-  const mimeType = normalizeOptionalString(image.mimeType) ?? "image/png";
-  return {
-    type: "buffer",
-    dataUrl: `data:${mimeType};base64,${image.buffer.toString("base64")}`,
-  };
-}
-
-function buildCharacterSegment(params: {
-  req: VideoGenerationRequest;
-  avatarId: string | undefined;
-}): Record<string, unknown> {
-  const imageAsset = resolveImageAsset(params.req);
-  if (imageAsset) {
-    return {
-      type: "talking_photo",
-      talking_photo_url: imageAsset.type === "url" ? imageAsset.url : imageAsset.dataUrl,
-    };
-  }
-  if (!params.avatarId) {
+  if (explicit) {
     throw new Error(
-      "HeyGen text-to-video requires an avatar_id (pass via providerOptions.avatar_id) or a reference image input.",
+      `HeyGen orientation must be 'landscape' or 'portrait'; got '${explicit}'.`,
     );
   }
-  return {
-    type: "avatar",
-    avatar_id: params.avatarId,
-    avatar_style: "normal",
-  };
+  return aspectRatioToOrientation(req.aspectRatio);
 }
 
-function buildVideoGenerateBody(req: VideoGenerationRequest): Record<string, unknown> {
+function buildFileAttachments(req: VideoGenerationRequest): HeyGenFileAttachment[] {
+  const files: HeyGenFileAttachment[] = [];
+  for (const image of req.inputImages ?? []) {
+    const url = normalizeOptionalString(image.url);
+    if (url) {
+      files.push({ type: "url", url });
+      continue;
+    }
+    if (!image.buffer) {
+      continue;
+    }
+    const mediaType = normalizeOptionalString(image.mimeType) ?? "image/png";
+    files.push({
+      type: "base64",
+      media_type: mediaType,
+      data: image.buffer.toString("base64"),
+    });
+  }
+  if (files.length > MAX_FILE_ATTACHMENTS) {
+    throw new Error(
+      `HeyGen Video Agent accepts at most ${MAX_FILE_ATTACHMENTS} file attachments; got ${files.length}.`,
+    );
+  }
+  return files;
+}
+
+function buildCreateSessionBody(req: VideoGenerationRequest): Record<string, unknown> {
   const opts = req.providerOptions ?? {};
+  const prompt = normalizeOptionalString(req.prompt);
+  if (!prompt) {
+    throw new Error("HeyGen Video Agent requires a non-empty prompt.");
+  }
+
+  const body: Record<string, unknown> = { prompt };
+
+  const mode = resolveProviderOption(opts, "mode");
+  if (mode === "generate" || mode === "chat") {
+    body.mode = mode;
+  }
+
   const avatarId = resolveProviderOption(opts, "avatar_id");
+  if (avatarId) {
+    body.avatar_id = avatarId;
+  }
   const voiceId = resolveProviderOption(opts, "voice_id");
+  if (voiceId) {
+    body.voice_id = voiceId;
+  }
   const styleId = resolveProviderOption(opts, "style_id");
-  const orientation = (resolveProviderOption(opts, "orientation") ??
-    aspectRatioToOrientation(req.aspectRatio)) as HeyGenOrientation;
-  const callbackUrl = resolveProviderOption(opts, "callback_url");
-  const callbackId = resolveProviderOption(opts, "callback_id");
-
-  if (!voiceId) {
-    throw new Error(
-      "HeyGen video generation requires a voice_id (pass via providerOptions.voice_id).",
-    );
-  }
-
-  const character = buildCharacterSegment({ req, avatarId });
-  const voice: Record<string, unknown> = {
-    type: "text",
-    input_text: req.prompt,
-    voice_id: voiceId,
-  };
-
-  const dimension = orientationToDimension(orientation);
-
-  const videoInputs: Array<Record<string, unknown>> = [
-    {
-      character,
-      voice,
-    },
-  ];
-
-  const body: Record<string, unknown> = {
-    video_inputs: videoInputs,
-    dimension,
-    aspect_ratio: req.aspectRatio ?? orientationToAspectRatio(orientation),
-  };
-
   if (styleId) {
-    body.style = styleId;
+    body.style_id = styleId;
   }
+
+  const orientation = resolveOrientation(req, opts);
+  if (orientation) {
+    body.orientation = orientation;
+  }
+
+  const files = buildFileAttachments(req);
+  if (files.length > 0) {
+    body.files = files;
+  }
+
+  const callbackUrl = resolveProviderOption(opts, "callback_url");
   if (callbackUrl) {
     body.callback_url = callbackUrl;
   }
+  const callbackId = resolveProviderOption(opts, "callback_id");
   if (callbackId) {
     body.callback_id = callbackId;
+  }
+
+  const incognito = opts.incognito_mode;
+  if (typeof incognito === "boolean") {
+    body.incognito_mode = incognito;
   }
 
   return body;
 }
 
-function orientationToAspectRatio(orientation: HeyGenOrientation): string {
-  switch (orientation) {
-    case "portrait":
-      return "9:16";
-    case "square":
-      return "1:1";
-    case "landscape":
-    default:
-      return "16:9";
+function extractErrorMessage(payload: {
+  error?: { code?: string | number; message?: string } | null;
+}): string | undefined {
+  if (!payload.error) {
+    return undefined;
   }
+  return normalizeOptionalString(payload.error.message) ?? undefined;
 }
 
-function orientationToDimension(orientation: HeyGenOrientation): {
-  width: number;
-  height: number;
-} {
-  switch (orientation) {
-    case "portrait":
-      return { width: 720, height: 1280 };
-    case "square":
-      return { width: 960, height: 960 };
-    case "landscape":
-    default:
-      return { width: 1280, height: 720 };
+function translateHeyGenHttpError(status: number, body: string): Error {
+  const lower = body.toLowerCase();
+  if (status === 401) {
+    return new Error("HeyGen API key missing or invalid");
   }
+  if (status === 402 || /quota|credit|payment required|insufficient/i.test(body)) {
+    return new Error("HeyGen credit limit reached");
+  }
+  if (status === 404) {
+    if (lower.includes("avatar")) {
+      return new Error("HeyGen avatar not found. Check providerOptions.avatar_id.");
+    }
+    if (lower.includes("voice")) {
+      return new Error("HeyGen voice not found. Check providerOptions.voice_id.");
+    }
+    return new Error("HeyGen resource not found");
+  }
+  if (status === 429) {
+    return new Error("HeyGen rate limit exceeded; retry after the Retry-After interval.");
+  }
+  return new Error(
+    `HeyGen Video Agent request failed with status ${status}: ${body || "(empty response body)"}`,
+  );
 }
 
-function translateHeyGenHttpError(error: unknown): Error {
-  if (!(error instanceof Error)) {
-    return new Error(String(error));
-  }
-  const message = error.message;
-  if (/\b401\b|unauthorized|invalid api key/i.test(message)) {
-    return new Error(`HeyGen authentication failed: ${message}`);
-  }
-  if (/\b402\b|payment required|insufficient.*credit|quota/i.test(message)) {
-    return new Error(`HeyGen credit limit reached: ${message}`);
-  }
-  return error;
-}
-
-async function pollHeyGenVideoStatus(params: {
-  videoId: string;
+async function pollSessionUntilVideoReady(params: {
+  sessionId: string;
   headers: Headers;
-  timeoutMs?: number;
+  deadline: ReturnType<typeof createProviderOperationDeadline>;
   baseUrl: string;
   fetchFn: typeof fetch;
-}): Promise<HeyGenVideoStatusResponse["data"]> {
-  const deadline = createProviderOperationDeadline({
-    timeoutMs: params.timeoutMs,
-    label: `HeyGen video generation task ${params.videoId}`,
-  });
+}): Promise<{ sessionStatus: SessionStatus; videoId: string }> {
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
     const response = await fetchWithTimeout(
-      `${params.baseUrl}/v1/video_status.get?video_id=${encodeURIComponent(params.videoId)}`,
-      {
-        method: "GET",
-        headers: params.headers,
-      },
-      resolveProviderOperationTimeoutMs({ deadline, defaultTimeoutMs: DEFAULT_TIMEOUT_MS }),
+      `${params.baseUrl}/v3/video-agents/${encodeURIComponent(params.sessionId)}`,
+      { method: "GET", headers: params.headers },
+      resolveProviderOperationTimeoutMs({
+        deadline: params.deadline,
+        defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+      }),
       params.fetchFn,
     );
-    try {
-      await assertOkOrThrowHttpError(response, "HeyGen video status request failed");
-    } catch (error) {
-      throw translateHeyGenHttpError(error);
+    if (!response.ok) {
+      const bodyText = await response.text().catch(() => "");
+      throw translateHeyGenHttpError(response.status, bodyText);
     }
-    const payload = (await response.json()) as HeyGenVideoStatusResponse;
+    const payload = (await response.json()) as GetSessionResponse;
+    const data = payload.data;
+    const status = data?.status;
+    const videoId = normalizeOptionalString(data?.video_id ?? undefined);
+
+    switch (status) {
+      case "failed": {
+        const message = extractErrorMessage(payload) ?? "HeyGen Video Agent session failed";
+        throw new Error(message);
+      }
+      case "waiting_for_input":
+        throw new Error(
+          "HeyGen Video Agent session is waiting for input. Use mode='generate' for one-shot generation.",
+        );
+      case "completed":
+        if (videoId) {
+          return { sessionStatus: status, videoId };
+        }
+        throw new Error("HeyGen Video Agent session completed without a video_id.");
+      default:
+        if (videoId) {
+          return { sessionStatus: status ?? "generating", videoId };
+        }
+        break;
+    }
+    await waitProviderOperationPollInterval({
+      deadline: params.deadline,
+      pollIntervalMs: POLL_INTERVAL_MS,
+    });
+  }
+  throw new Error(
+    `HeyGen Video Agent session ${params.sessionId} did not produce a video within the poll window.`,
+  );
+}
+
+async function pollVideoUntilCompleted(params: {
+  videoId: string;
+  headers: Headers;
+  deadline: ReturnType<typeof createProviderOperationDeadline>;
+  baseUrl: string;
+  fetchFn: typeof fetch;
+}): Promise<NonNullable<GetVideoResponse["data"]>> {
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+    const response = await fetchWithTimeout(
+      `${params.baseUrl}/v3/videos/${encodeURIComponent(params.videoId)}`,
+      { method: "GET", headers: params.headers },
+      resolveProviderOperationTimeoutMs({
+        deadline: params.deadline,
+        defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+      }),
+      params.fetchFn,
+    );
+    if (!response.ok) {
+      const bodyText = await response.text().catch(() => "");
+      throw translateHeyGenHttpError(response.status, bodyText);
+    }
+    const payload = (await response.json()) as GetVideoResponse;
     const data = payload.data;
     switch (data?.status) {
       case "completed":
         return data;
       case "failed": {
-        const failureMessage =
-          normalizeOptionalString(data.error?.message) ||
-          normalizeOptionalString(payload.error?.message) ||
-          "HeyGen video generation failed";
-        throw new Error(failureMessage);
+        const message =
+          normalizeOptionalString(data.failure_message) ||
+          normalizeOptionalString(data.failure_code) ||
+          extractErrorMessage(payload) ||
+          "HeyGen video rendering failed";
+        throw new Error(message);
       }
-      case "pending":
-      case "processing":
-      case "waiting":
       default:
-        await waitProviderOperationPollInterval({ deadline, pollIntervalMs: POLL_INTERVAL_MS });
+        await waitProviderOperationPollInterval({
+          deadline: params.deadline,
+          pollIntervalMs: POLL_INTERVAL_MS,
+        });
         break;
     }
   }
-  throw new Error(`HeyGen video generation task ${params.videoId} did not finish in time`);
+  throw new Error(
+    `HeyGen video ${params.videoId} did not finish rendering within the poll window.`,
+  );
 }
 
 async function downloadHeyGenVideo(params: {
@@ -278,10 +357,11 @@ async function downloadHeyGenVideo(params: {
   await assertOkOrThrowHttpError(response, "HeyGen generated video download failed");
   const mimeType = normalizeOptionalString(response.headers.get("content-type")) ?? "video/mp4";
   const arrayBuffer = await response.arrayBuffer();
+  const ext = mimeType.includes("webm") ? "webm" : "mp4";
   return {
     buffer: Buffer.from(arrayBuffer),
     mimeType,
-    fileName: `video-1.${mimeType.includes("webm") ? "webm" : "mp4"}`,
+    fileName: `video-1.${ext}`,
     metadata: { sourceUrl: params.url },
   };
 }
@@ -303,8 +383,10 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
         voice_id: "string",
         style_id: "string",
         orientation: "string",
+        mode: "string",
         callback_url: "string",
         callback_id: "string",
+        incognito_mode: "boolean",
       },
       generate: {
         maxVideos: 1,
@@ -316,7 +398,7 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
       imageToVideo: {
         enabled: true,
         maxVideos: 1,
-        maxInputImages: 1,
+        maxInputImages: MAX_FILE_ATTACHMENTS,
         maxDurationSeconds: MAX_DURATION_SECONDS,
         aspectRatios: HEYGEN_ASPECT_RATIOS,
         supportsAspectRatio: true,
@@ -344,9 +426,9 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
       const fetchFn = fetch;
       const deadline = createProviderOperationDeadline({
         timeoutMs: req.timeoutMs,
-        label: "HeyGen video generation",
+        label: "HeyGen Video Agent",
       });
-      const requestBody = buildVideoGenerateBody(req);
+      const requestBody = buildCreateSessionBody(req);
       const { baseUrl, allowPrivateNetwork, headers, dispatcherPolicy } =
         resolveProviderHttpRequestConfig({
           baseUrl: resolveHeyGenBaseUrl(req),
@@ -362,7 +444,7 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
         });
 
       const { response, release } = await postJsonRequest({
-        url: `${baseUrl}/v2/video/generate`,
+        url: `${baseUrl}/v3/video-agents`,
         headers,
         body: requestBody,
         timeoutMs: resolveProviderOperationTimeoutMs({
@@ -375,35 +457,47 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
       });
 
       try {
-        try {
-          await assertOkOrThrowHttpError(response, "HeyGen video generation failed");
-        } catch (error) {
-          throw translateHeyGenHttpError(error);
+        if (!response.ok) {
+          const bodyText = await response.text().catch(() => "");
+          throw translateHeyGenHttpError(response.status, bodyText);
         }
-        const submitted = (await response.json()) as HeyGenVideoGenerateResponse;
+        const submitted = (await response.json()) as CreateSessionResponse;
         if (submitted.error) {
-          const code = submitted.error.code;
           const message =
-            normalizeOptionalString(submitted.error.message) ?? "HeyGen video generation failed";
-          throw translateHeyGenHttpError(new Error(`${code ?? "error"}: ${message}`));
+            extractErrorMessage(submitted) ?? "HeyGen Video Agent session create failed";
+          throw new Error(message);
         }
-        const videoId = normalizeOptionalString(submitted.data?.video_id);
+        const sessionId = normalizeOptionalString(submitted.data?.session_id);
+        if (!sessionId) {
+          throw new Error("HeyGen Video Agent create response missing session_id.");
+        }
+        const initialStatus = submitted.data?.status;
+        if (initialStatus === "failed") {
+          throw new Error("HeyGen Video Agent session failed immediately after create.");
+        }
+        let videoId = normalizeOptionalString(submitted.data?.video_id ?? undefined);
+        let sessionStatus: SessionStatus = initialStatus ?? "thinking";
         if (!videoId) {
-          throw new Error("HeyGen video generation response missing video_id");
+          const polled = await pollSessionUntilVideoReady({
+            sessionId,
+            headers,
+            deadline,
+            baseUrl,
+            fetchFn,
+          });
+          videoId = polled.videoId;
+          sessionStatus = polled.sessionStatus;
         }
-        const completed = await pollHeyGenVideoStatus({
+        const completed = await pollVideoUntilCompleted({
           videoId,
           headers,
-          timeoutMs: resolveProviderOperationTimeoutMs({
-            deadline,
-            defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
-          }),
+          deadline,
           baseUrl,
           fetchFn,
         });
-        const videoUrl = normalizeOptionalString(completed?.video_url);
+        const videoUrl = normalizeOptionalString(completed.video_url ?? undefined);
         if (!videoUrl) {
-          throw new Error("HeyGen video generation completed without a video URL");
+          throw new Error("HeyGen video rendering completed without a video_url.");
         }
         const video = await downloadHeyGenVideo({
           url: videoUrl,
@@ -417,12 +511,13 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
           videos: [video],
           model: normalizeOptionalString(req.model) ?? DEFAULT_HEYGEN_MODEL,
           metadata: {
+            sessionId,
             videoId,
-            status: completed?.status,
+            sessionStatus,
+            videoStatus: completed.status,
             videoUrl,
-            thumbnailUrl: completed?.thumbnail_url,
-            duration: completed?.duration,
-            callbackId: completed?.callback_id ?? undefined,
+            thumbnailUrl: completed.thumbnail_url ?? undefined,
+            duration: completed.duration ?? undefined,
           },
         };
       } finally {

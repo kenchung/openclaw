@@ -5,8 +5,7 @@ import {
   installProviderHttpMockCleanup,
 } from "../../test/helpers/media-generation/provider-http-mocks.js";
 
-const { postJsonRequestMock, fetchWithTimeoutMock, assertOkOrThrowHttpErrorMock } =
-  getProviderHttpMocks();
+const { postJsonRequestMock, fetchWithTimeoutMock } = getProviderHttpMocks();
 
 let buildHeyGenVideoGenerationProvider: typeof import("./video-generation-provider.js").buildHeyGenVideoGenerationProvider;
 
@@ -16,48 +15,69 @@ beforeAll(async () => {
 
 installProviderHttpMockCleanup();
 
-function mockHeyGenSuccessfulRun(params?: { videoId?: string; videoUrl?: string }) {
-  const videoId = params?.videoId ?? "vid_abc123";
-  const videoUrl = params?.videoUrl ?? "https://cdn.heygen.com/out.mp4";
+function mockCreateSession(params: {
+  sessionId?: string;
+  videoId?: string | null;
+  status?: string;
+} = {}) {
   postJsonRequestMock.mockResolvedValue({
     response: {
-      json: async () => ({ data: { video_id: videoId } }),
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          session_id: params.sessionId ?? "sess_abc",
+          status: params.status ?? "generating",
+          video_id: params.videoId ?? "vid_xyz",
+          created_at: 1_700_000_000,
+        },
+      }),
     },
     release: vi.fn(async () => {}),
   });
+}
+
+function mockVideoCompleted(params: { videoId?: string; videoUrl?: string } = {}) {
+  const videoId = params.videoId ?? "vid_xyz";
+  const videoUrl = params.videoUrl ?? "https://files.heygen.ai/v/vid_xyz.mp4";
   fetchWithTimeoutMock
     .mockResolvedValueOnce({
+      ok: true,
+      status: 200,
       json: async () => ({
         data: {
           id: videoId,
           status: "completed",
           video_url: videoUrl,
-          thumbnail_url: "https://cdn.heygen.com/thumb.jpg",
-          duration: 12,
+          thumbnail_url: "https://files.heygen.ai/t/vid_xyz.jpg",
+          duration: 12.5,
         },
       }),
       headers: new Headers(),
     })
     .mockResolvedValueOnce({
+      ok: true,
+      status: 200,
       arrayBuffer: async () => Buffer.from("mp4-bytes"),
       headers: new Headers({ "content-type": "video/mp4" }),
     });
   return { videoId, videoUrl };
 }
 
-describe("heygen video generation provider", () => {
+describe("heygen video agent provider", () => {
   it("declares explicit mode capabilities", () => {
     expectExplicitVideoGenerationCapabilities(buildHeyGenVideoGenerationProvider());
   });
 
-  it("submits a text-to-video request, polls it, and downloads the output", async () => {
-    const { videoId } = mockHeyGenSuccessfulRun();
+  it("creates a video-agents session, polls the video, and downloads the output", async () => {
+    mockCreateSession();
+    const { videoId, videoUrl } = mockVideoCompleted();
 
     const provider = buildHeyGenVideoGenerationProvider();
     const result = await provider.generateVideo({
       provider: "heygen",
-      model: "avatar_iv",
-      prompt: "Hello, I am Ken.",
+      model: "video_agent_v3",
+      prompt: "Welcome new agents to HeyGen.",
       cfg: {},
       aspectRatio: "16:9",
       providerOptions: {
@@ -68,30 +88,20 @@ describe("heygen video generation provider", () => {
 
     expect(postJsonRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "https://api.heygen.com/v2/video/generate",
+        url: "https://api.heygen.com/v3/video-agents",
+        body: expect.objectContaining({
+          prompt: "Welcome new agents to HeyGen.",
+          avatar_id: "avatar_demo_1",
+          voice_id: "voice_demo_1",
+          orientation: "landscape",
+        }),
       }),
     );
-    const request = postJsonRequestMock.mock.calls[0]?.[0] as { body?: Record<string, unknown> };
-    expect(request.body).toMatchObject({
-      aspect_ratio: "16:9",
-      dimension: { width: 1280, height: 720 },
-      video_inputs: [
-        {
-          character: {
-            type: "avatar",
-            avatar_id: "avatar_demo_1",
-          },
-          voice: {
-            type: "text",
-            input_text: "Hello, I am Ken.",
-            voice_id: "voice_demo_1",
-          },
-        },
-      ],
-    });
+    const body = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(body.body).not.toHaveProperty("aspect_ratio");
     expect(fetchWithTimeoutMock).toHaveBeenNthCalledWith(
       1,
-      `https://api.heygen.com/v1/video_status.get?video_id=${videoId}`,
+      `https://api.heygen.com/v3/videos/${videoId}`,
       expect.objectContaining({ method: "GET" }),
       120000,
       fetch,
@@ -99,75 +109,71 @@ describe("heygen video generation provider", () => {
     expect(result.videos).toHaveLength(1);
     expect(result.metadata).toEqual(
       expect.objectContaining({
+        sessionId: "sess_abc",
         videoId,
-        status: "completed",
-        videoUrl: "https://cdn.heygen.com/out.mp4",
+        videoUrl,
+        videoStatus: "completed",
       }),
     );
   });
 
-  it("maps 16:9, 9:16, and 1:1 aspect ratios to landscape, portrait, and square dimensions", async () => {
+  it("maps 16:9 and 9:16 aspect ratios to landscape and portrait orientations", async () => {
     const provider = buildHeyGenVideoGenerationProvider();
     const providerOptions = { avatar_id: "a1", voice_id: "v1" };
 
-    mockHeyGenSuccessfulRun({ videoId: "vid_landscape" });
+    mockCreateSession({ videoId: "vid_landscape" });
+    mockVideoCompleted({ videoId: "vid_landscape" });
     await provider.generateVideo({
       provider: "heygen",
-      model: "avatar_iv",
+      model: "video_agent_v3",
       prompt: "hello",
       aspectRatio: "16:9",
       cfg: {},
       providerOptions,
     });
-    const landscape = postJsonRequestMock.mock.calls[0]?.[0] as { body?: Record<string, unknown> };
-    expect(landscape.body).toMatchObject({
-      aspect_ratio: "16:9",
-      dimension: { width: 1280, height: 720 },
-    });
+    const landscape = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(landscape.body).toMatchObject({ orientation: "landscape" });
 
     postJsonRequestMock.mockClear();
     fetchWithTimeoutMock.mockClear();
-    mockHeyGenSuccessfulRun({ videoId: "vid_portrait" });
+    mockCreateSession({ videoId: "vid_portrait" });
+    mockVideoCompleted({ videoId: "vid_portrait" });
     await provider.generateVideo({
       provider: "heygen",
-      model: "avatar_iv",
+      model: "video_agent_v3",
       prompt: "hello",
       aspectRatio: "9:16",
       cfg: {},
       providerOptions,
     });
-    const portrait = postJsonRequestMock.mock.calls[0]?.[0] as { body?: Record<string, unknown> };
-    expect(portrait.body).toMatchObject({
-      aspect_ratio: "9:16",
-      dimension: { width: 720, height: 1280 },
-    });
-
-    postJsonRequestMock.mockClear();
-    fetchWithTimeoutMock.mockClear();
-    mockHeyGenSuccessfulRun({ videoId: "vid_square" });
-    await provider.generateVideo({
-      provider: "heygen",
-      model: "avatar_iv",
-      prompt: "hello",
-      aspectRatio: "1:1",
-      cfg: {},
-      providerOptions,
-    });
-    const square = postJsonRequestMock.mock.calls[0]?.[0] as { body?: Record<string, unknown> };
-    expect(square.body).toMatchObject({
-      aspect_ratio: "1:1",
-      dimension: { width: 960, height: 960 },
-    });
+    const portrait = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(portrait.body).toMatchObject({ orientation: "portrait" });
   });
 
-  it("converts local image buffers into data URLs for image-to-video requests", async () => {
-    mockHeyGenSuccessfulRun();
+  it("rejects 1:1 aspect ratio (HeyGen Video Agent only supports landscape/portrait)", async () => {
+    const provider = buildHeyGenVideoGenerationProvider();
+    await expect(
+      provider.generateVideo({
+        provider: "heygen",
+        model: "video_agent_v3",
+        prompt: "hello",
+        cfg: {},
+        aspectRatio: "1:1",
+        providerOptions: { avatar_id: "a1", voice_id: "v1" },
+      }),
+    ).rejects.toThrow(/does not support aspect ratio 1:1/u);
+    expect(postJsonRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("converts local image buffers into AssetBase64 file attachments", async () => {
+    mockCreateSession();
+    mockVideoCompleted();
 
     const provider = buildHeyGenVideoGenerationProvider();
     await provider.generateVideo({
       provider: "heygen",
-      model: "avatar_iv",
-      prompt: "Animate this photo",
+      model: "video_agent_v3",
+      prompt: "Use this slide as scene context.",
       cfg: {},
       aspectRatio: "9:16",
       inputImages: [{ buffer: Buffer.from("png-bytes"), mimeType: "image/png" }],
@@ -176,23 +182,25 @@ describe("heygen video generation provider", () => {
       },
     });
 
-    const request = postJsonRequestMock.mock.calls[0]?.[0] as { body?: Record<string, unknown> };
-    const videoInputs = (
-      request.body as { video_inputs: Array<{ character: Record<string, unknown> }> }
-    ).video_inputs;
-    expect(videoInputs[0].character).toMatchObject({
-      type: "talking_photo",
-      talking_photo_url: expect.stringMatching(/^data:image\/png;base64,/u),
+    const request = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(request.body).toMatchObject({
+      files: [
+        {
+          type: "base64",
+          media_type: "image/png",
+          data: expect.stringMatching(/^[A-Za-z0-9+/=]+$/u),
+        },
+      ],
     });
   });
 
-  it("rejects video reference inputs since HeyGen has no video-to-video mode", async () => {
+  it("rejects video reference inputs (HeyGen Video Agent has no video-to-video mode)", async () => {
     const provider = buildHeyGenVideoGenerationProvider();
 
     await expect(
       provider.generateVideo({
         provider: "heygen",
-        model: "avatar_iv",
+        model: "video_agent_v3",
         prompt: "restyle this clip",
         cfg: {},
         inputVideos: [{ url: "https://example.com/in.mp4" }],
@@ -208,91 +216,154 @@ describe("heygen video generation provider", () => {
     await expect(
       provider.generateVideo({
         provider: "heygen",
-        model: "avatar_iv",
+        model: "video_agent_v3",
         prompt: "hello",
         cfg: {},
         aspectRatio: "21:9",
         providerOptions: { avatar_id: "a1", voice_id: "v1" },
       }),
-    ).rejects.toThrow(/HeyGen video generation does not support aspect ratio 21:9/u);
+    ).rejects.toThrow(/does not support aspect ratio 21:9/u);
     expect(postJsonRequestMock).not.toHaveBeenCalled();
   });
 
-  it("translates 401 HTTP failures into an authentication error", async () => {
-    postJsonRequestMock.mockResolvedValue({
-      response: { json: async () => ({}) },
-      release: vi.fn(async () => {}),
-    });
-    assertOkOrThrowHttpErrorMock.mockImplementationOnce(async () => {
-      throw new Error("HeyGen video generation failed: 401 Unauthorized");
-    });
-
-    const provider = buildHeyGenVideoGenerationProvider();
-
-    await expect(
-      provider.generateVideo({
-        provider: "heygen",
-        model: "avatar_iv",
-        prompt: "hello",
-        cfg: {},
-        aspectRatio: "16:9",
-        providerOptions: { avatar_id: "a1", voice_id: "v1" },
-      }),
-    ).rejects.toThrow(/HeyGen authentication failed/u);
-  });
-
-  it("translates 402 HTTP failures into a credit limit error", async () => {
-    postJsonRequestMock.mockResolvedValue({
-      response: { json: async () => ({}) },
-      release: vi.fn(async () => {}),
-    });
-    assertOkOrThrowHttpErrorMock.mockImplementationOnce(async () => {
-      throw new Error("HeyGen video generation failed: 402 Payment Required");
-    });
-
-    const provider = buildHeyGenVideoGenerationProvider();
-
-    await expect(
-      provider.generateVideo({
-        provider: "heygen",
-        model: "avatar_iv",
-        prompt: "hello",
-        cfg: {},
-        aspectRatio: "16:9",
-        providerOptions: { avatar_id: "a1", voice_id: "v1" },
-      }),
-    ).rejects.toThrow(/HeyGen credit limit reached/u);
-  });
-
-  it("surfaces the failure_message when polling returns a failed status", async () => {
+  it("translates 401 create responses into an authentication error", async () => {
     postJsonRequestMock.mockResolvedValue({
       response: {
-        json: async () => ({ data: { video_id: "vid_fail" } }),
+        ok: false,
+        status: 401,
+        text: async () => "unauthorized",
+        json: async () => ({}),
       },
       release: vi.fn(async () => {}),
     });
+
+    const provider = buildHeyGenVideoGenerationProvider();
+    await expect(
+      provider.generateVideo({
+        provider: "heygen",
+        model: "video_agent_v3",
+        prompt: "hello",
+        cfg: {},
+        aspectRatio: "16:9",
+        providerOptions: { avatar_id: "a1", voice_id: "v1" },
+      }),
+    ).rejects.toThrow("HeyGen API key missing or invalid");
+  });
+
+  it("translates 402 create responses into a credit limit error", async () => {
+    postJsonRequestMock.mockResolvedValue({
+      response: {
+        ok: false,
+        status: 402,
+        text: async () => "payment required",
+        json: async () => ({}),
+      },
+      release: vi.fn(async () => {}),
+    });
+
+    const provider = buildHeyGenVideoGenerationProvider();
+    await expect(
+      provider.generateVideo({
+        provider: "heygen",
+        model: "video_agent_v3",
+        prompt: "hello",
+        cfg: {},
+        aspectRatio: "16:9",
+        providerOptions: { avatar_id: "a1", voice_id: "v1" },
+      }),
+    ).rejects.toThrow("HeyGen credit limit reached");
+  });
+
+  it("polls the session endpoint when video_id is null on create", async () => {
+    mockCreateSession({ videoId: null, status: "thinking" });
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            session_id: "sess_abc",
+            status: "generating",
+            video_id: "vid_late",
+            progress: 30,
+            created_at: 1_700_000_000,
+          },
+        }),
+        headers: new Headers(),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            id: "vid_late",
+            status: "completed",
+            video_url: "https://files.heygen.ai/v/vid_late.mp4",
+            duration: 8,
+          },
+        }),
+        headers: new Headers(),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => Buffer.from("mp4"),
+        headers: new Headers({ "content-type": "video/mp4" }),
+      });
+
+    const provider = buildHeyGenVideoGenerationProvider();
+    const result = await provider.generateVideo({
+      provider: "heygen",
+      model: "video_agent_v3",
+      prompt: "hello",
+      cfg: {},
+      aspectRatio: "16:9",
+      providerOptions: { avatar_id: "a1", voice_id: "v1" },
+    });
+
+    expect(fetchWithTimeoutMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.heygen.com/v3/video-agents/sess_abc",
+      expect.objectContaining({ method: "GET" }),
+      120000,
+      fetch,
+    );
+    expect(fetchWithTimeoutMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.heygen.com/v3/videos/vid_late",
+      expect.objectContaining({ method: "GET" }),
+      120000,
+      fetch,
+    );
+    expect(result.metadata).toMatchObject({ videoId: "vid_late" });
+  });
+
+  it("surfaces failure_message when the video poll returns a failed status", async () => {
+    mockCreateSession({ videoId: "vid_fail" });
     fetchWithTimeoutMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
       json: async () => ({
         data: {
           id: "vid_fail",
           status: "failed",
-          error: { code: "generation_failed", message: "avatar id not found" },
+          failure_code: "avatar_unavailable",
+          failure_message: "Avatar is temporarily unavailable",
         },
       }),
       headers: new Headers(),
     });
 
     const provider = buildHeyGenVideoGenerationProvider();
-
     await expect(
       provider.generateVideo({
         provider: "heygen",
-        model: "avatar_iv",
+        model: "video_agent_v3",
         prompt: "hello",
         cfg: {},
         aspectRatio: "16:9",
         providerOptions: { avatar_id: "a1", voice_id: "v1" },
       }),
-    ).rejects.toThrow(/avatar id not found/u);
+    ).rejects.toThrow("Avatar is temporarily unavailable");
   });
 });
