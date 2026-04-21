@@ -76,7 +76,6 @@ type GetVideoResponse = {
 
 type HeyGenFileAttachment =
   | { type: "url"; url: string }
-  | { type: "asset_id"; asset_id: string }
   | { type: "base64"; media_type: string; data: string };
 
 function resolveHeyGenBaseUrl(req: VideoGenerationRequest): string {
@@ -178,9 +177,7 @@ function buildCreateSessionBody(req: VideoGenerationRequest): Record<string, unk
   const body: Record<string, unknown> = { prompt };
 
   const mode = resolveProviderOption(opts, "mode");
-  if (mode === "generate" || mode === "chat") {
-    body.mode = mode;
-  }
+  body.mode = mode === "chat" ? "chat" : "generate";
 
   const avatarId =
     resolveProviderOption(opts, "avatar_id") ?? resolveHeyGenConfigString(req, "defaultAvatarId");
@@ -431,6 +428,7 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
       if ((req.inputVideos?.length ?? 0) > 0) {
         throw new Error("HeyGen video generation does not support video reference inputs.");
       }
+      const requestBody = buildCreateSessionBody(req);
 
       const auth = await resolveApiKeyForProvider({
         provider: "heygen",
@@ -447,7 +445,6 @@ export function buildHeyGenVideoGenerationProvider(): VideoGenerationProvider {
         timeoutMs: req.timeoutMs,
         label: "HeyGen Video Agent",
       });
-      const requestBody = buildCreateSessionBody(req);
       const { baseUrl, allowPrivateNetwork, headers, dispatcherPolicy } =
         resolveProviderHttpRequestConfig({
           baseUrl: resolveHeyGenBaseUrl(req),

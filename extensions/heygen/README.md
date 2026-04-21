@@ -13,7 +13,7 @@ Unlike cinematic video providers (Veo, Runway, Kling) that excel at open-ended s
 
 ## When to use HeyGen vs other video providers
 
-Pick HeyGen when the video needs a **recognizable human presenter**: explainer videos, internal training, sales enablement, localized announcements, talking-head content. Pick Veo / Runway / Kling when the video needs **imagined scenes without a fixed identity** — cinematic b-roll, scene generation, non-presenter content.
+Pick HeyGen when the video needs a **recognizable human presenter**: explainer videos, internal training, sales enablement, localized announcements, talking-head content. Pick Veo / Runway / Kling when the video needs **imagined scenes without a fixed identity**: cinematic b-roll, scene generation, non-presenter content.
 
 ## Enable
 
@@ -76,7 +76,7 @@ await video_generate({
 ## Capabilities
 
 - Modes: `generate`, `imageToVideo` (reference image attached as scene context)
-- Aspect ratios: `16:9` (landscape), `9:16` (portrait). `1:1` is not supported — HeyGen Video Agent orientation enum is `landscape | portrait` only.
+- Aspect ratios: `16:9` (landscape), `9:16` (portrait). `1:1` is not supported. HeyGen Video Agent orientation enum is `landscape | portrait` only.
 - Max duration: 300 seconds (5 minutes)
 - Reference files: up to 20 input images forwarded as HeyGen file attachments
 

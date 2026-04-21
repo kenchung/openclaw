@@ -117,6 +117,37 @@ describe("heygen video agent provider", () => {
     );
   });
 
+  it("always sends mode: 'generate' unless caller explicitly asks for 'chat'", async () => {
+    mockCreateSession();
+    mockVideoCompleted();
+    const provider = buildHeyGenVideoGenerationProvider();
+    await provider.generateVideo({
+      provider: "heygen",
+      model: "video_agent_v3",
+      prompt: "one-shot",
+      cfg: {},
+      aspectRatio: "16:9",
+      providerOptions: { avatar_id: "a", voice_id: "v" },
+    });
+    const body = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(body.body).toMatchObject({ mode: "generate" });
+
+    postJsonRequestMock.mockClear();
+    fetchWithTimeoutMock.mockClear();
+    mockCreateSession();
+    mockVideoCompleted();
+    await provider.generateVideo({
+      provider: "heygen",
+      model: "video_agent_v3",
+      prompt: "chat",
+      cfg: {},
+      aspectRatio: "16:9",
+      providerOptions: { avatar_id: "a", voice_id: "v", mode: "chat" },
+    });
+    const chatBody = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(chatBody.body).toMatchObject({ mode: "chat" });
+  });
+
   it("maps 16:9 and 9:16 aspect ratios to landscape and portrait orientations", async () => {
     const provider = buildHeyGenVideoGenerationProvider();
     const providerOptions = { avatar_id: "a1", voice_id: "v1" };

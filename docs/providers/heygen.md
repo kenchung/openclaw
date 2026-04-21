@@ -62,7 +62,7 @@ HeyGen Video Agent does not support video-to-video.
 ## Aspect ratios
 
 HeyGen Video Agent accepts `16:9` (landscape) and `9:16` (portrait). `1:1` is
-not supported — the `orientation` enum is `landscape | portrait` only. The
+not supported. The `orientation` enum is `landscape | portrait` only. The
 provider maps OpenClaw's `aspectRatio` to HeyGen's `orientation` field
 automatically.
 
@@ -160,7 +160,7 @@ falls back to the workspace default presenter (or errors).
 
   <Accordion title="Callback webhooks">
     Pass `callback_url` to receive completion or failure notifications
-    asynchronously. Attach a `callback_id` as a correlation handle — HeyGen
+    asynchronously. Attach a `callback_id` as a correlation handle. HeyGen
     echoes it back in the webhook payload so you can match the notification to
     the original request without parsing the video id.
   </Accordion>
