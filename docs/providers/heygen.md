@@ -1,6 +1,6 @@
 ---
 title: "HeyGen"
-summary: "HeyGen avatar video generation setup in OpenClaw"
+summary: "HeyGen Video Agent setup in OpenClaw"
 read_when:
   - You want to use HeyGen avatar video generation in OpenClaw
   - You need the HeyGen API key/env setup
@@ -9,13 +9,13 @@ read_when:
 
 # HeyGen
 
-OpenClaw ships a bundled `heygen` provider for avatar video generation.
+OpenClaw ships a bundled `heygen` provider for HeyGen's Video Agent API.
 
-| Property    | Value                                                        |
-| ----------- | ------------------------------------------------------------ |
-| Provider id | `heygen`                                                     |
-| Auth        | `HEYGEN_API_KEY`                                             |
-| API         | HeyGen video generation (`GET /v1/video_status.get` polling) |
+| Property    | Value                                                                     |
+| ----------- | ------------------------------------------------------------------------- |
+| Provider id | `heygen`                                                                  |
+| Auth        | `HEYGEN_API_KEY`                                                          |
+| API         | HeyGen Video Agent (`POST /v3/video-agents` + `GET /v3/videos/{id}`)      |
 
 ## Getting started
 
@@ -27,7 +27,7 @@ OpenClaw ships a bundled `heygen` provider for avatar video generation.
   </Step>
   <Step title="Set HeyGen as the default video provider">
     ```bash
-    openclaw config set agents.defaults.videoGenerationModel.primary "heygen/avatar_iv"
+    openclaw config set agents.defaults.videoGenerationModel.primary "heygen/video_agent_v3"
     ```
   </Step>
   <Step title="Generate a video">
@@ -37,37 +37,38 @@ OpenClaw ships a bundled `heygen` provider for avatar video generation.
 
 ## Supported modes
 
-| Mode           | Model                 | Reference input           |
-| -------------- | --------------------- | ------------------------- |
-| Text-to-video  | `avatar_iv` (default) | None (avatar_id required) |
-| Image-to-video | `avatar_iv`           | 1 local or remote image   |
-| Video-to-video | Not supported.        | -                         |
+| Mode           | Model             | Reference input           |
+| -------------- | ----------------- | ------------------------- |
+| Text-to-video  | `video_agent_v3`  | None (avatar_id + voice_id required) |
+| Image-to-video | `video_agent_v3`  | 1 local or remote image (scene context) |
+| Video-to-video | Not supported.    | —                         |
 
 <Note>
 HeyGen is identity-first: every request needs an avatar plus a voice. Pass
-`avatar_id` and `voice_id` via `providerOptions`, or skip `avatar_id` and pass
-a reference image to drive a talking-photo look.
+`avatar_id` and `voice_id` via `providerOptions`. A reference image is optional
+scene context, not the avatar source.
 </Note>
 
 <Warning>
-HeyGen does not support video-to-video.
+HeyGen Video Agent does not support video-to-video.
 </Warning>
 
 ## Aspect ratios
 
-HeyGen accepts `16:9`, `9:16`, and `1:1`. The plugin maps each to HeyGen's
-`dimension` (landscape, portrait, square).
+HeyGen Video Agent accepts `16:9` (landscape) and `9:16` (portrait). `1:1` is
+not supported — the `orientation` enum is `landscape | portrait` only.
 
 ## Provider options
 
 The following HeyGen-specific options can be passed via `providerOptions`:
 
 - `avatar_id` (string): HeyGen avatar group or look id.
-- `voice_id` (string): HeyGen voice id (required).
+- `voice_id` (string): HeyGen voice id.
 - `style_id` (string): optional style template.
-- `orientation` (string): `landscape`, `portrait`, or `square`. Derived from `aspectRatio` if omitted.
+- `orientation` (string): `landscape` or `portrait`. Derived from `aspectRatio` if omitted.
 - `callback_url` (string): optional webhook URL.
 - `callback_id` (string): optional correlation id forwarded back on the webhook.
+- `incognito_mode` (boolean): opt out of server-side logging.
 
 ## Configuration
 
@@ -76,7 +77,7 @@ The following HeyGen-specific options can be passed via `providerOptions`:
   agents: {
     defaults: {
       videoGenerationModel: {
-        primary: "heygen/avatar_iv",
+        primary: "heygen/video_agent_v3",
       },
     },
   },
@@ -91,10 +92,18 @@ The following HeyGen-specific options can be passed via `providerOptions`:
     automatically from `HEYGEN_API_KEY`.
   </Accordion>
 
-  <Accordion title="Status polling">
-    After submitting a generation request, OpenClaw polls
-    `GET /v1/video_status.get?video_id=<id>` until the video is ready. No extra
-    configuration is needed for the polling behavior.
+  <Accordion title="Session vs. video polling">
+    `POST /v3/video-agents` creates a session. Most generate-mode responses
+    include `video_id` immediately; async or non-generate sessions return it
+    later. The plugin polls `GET /v3/video-agents/{session_id}` until
+    `video_id` is populated, then polls `GET /v3/videos/{video_id}` until the
+    video completes.
+  </Accordion>
+
+  <Accordion title="Failure surfacing">
+    When the video status is `failed`, the plugin surfaces the server's
+    `failure_message` instead of a generic error so callers can see why
+    HeyGen rejected the job (avatar unavailable, moderation flag, etc.).
   </Accordion>
 </AccordionGroup>
 
