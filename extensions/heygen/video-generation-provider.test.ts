@@ -226,6 +226,68 @@ describe("heygen video agent provider", () => {
     expect(postJsonRequestMock).not.toHaveBeenCalled();
   });
 
+  it("falls back to cfg.models.providers.heygen defaults when providerOptions omit avatar/voice/style", async () => {
+    mockCreateSession();
+    mockVideoCompleted();
+
+    const provider = buildHeyGenVideoGenerationProvider();
+    await provider.generateVideo({
+      provider: "heygen",
+      model: "video_agent_v3",
+      prompt: "hello",
+      aspectRatio: "16:9",
+      cfg: {
+        models: {
+          providers: {
+            heygen: {
+              defaultAvatarId: "cfg_avatar",
+              defaultVoiceId: "cfg_voice",
+              defaultStyleId: "cfg_style",
+            },
+          },
+        },
+      },
+      providerOptions: {},
+    });
+
+    const body = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(body.body).toMatchObject({
+      avatar_id: "cfg_avatar",
+      voice_id: "cfg_voice",
+      style_id: "cfg_style",
+    });
+  });
+
+  it("prefers providerOptions over cfg defaults when both are set", async () => {
+    mockCreateSession();
+    mockVideoCompleted();
+
+    const provider = buildHeyGenVideoGenerationProvider();
+    await provider.generateVideo({
+      provider: "heygen",
+      model: "video_agent_v3",
+      prompt: "hello",
+      aspectRatio: "16:9",
+      cfg: {
+        models: {
+          providers: {
+            heygen: {
+              defaultAvatarId: "cfg_avatar",
+              defaultVoiceId: "cfg_voice",
+            },
+          },
+        },
+      },
+      providerOptions: { avatar_id: "req_avatar", voice_id: "req_voice" },
+    });
+
+    const body = postJsonRequestMock.mock.calls[0]?.[0] as { body: Record<string, unknown> };
+    expect(body.body).toMatchObject({
+      avatar_id: "req_avatar",
+      voice_id: "req_voice",
+    });
+  });
+
   it("translates 401 create responses into an authentication error", async () => {
     postJsonRequestMock.mockResolvedValue({
       response: {

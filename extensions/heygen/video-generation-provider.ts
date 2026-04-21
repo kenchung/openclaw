@@ -85,6 +85,22 @@ function resolveHeyGenBaseUrl(req: VideoGenerationRequest): string {
   );
 }
 
+function resolveHeyGenProviderConfig(
+  req: VideoGenerationRequest,
+): Record<string, unknown> | undefined {
+  const providers = req.cfg?.models?.providers as Record<string, unknown> | undefined;
+  const heygen = providers?.heygen;
+  return heygen && typeof heygen === "object" ? (heygen as Record<string, unknown>) : undefined;
+}
+
+function resolveHeyGenConfigString(
+  req: VideoGenerationRequest,
+  key: string,
+): string | undefined {
+  const cfg = resolveHeyGenProviderConfig(req);
+  return cfg ? normalizeOptionalString(cfg[key]) : undefined;
+}
+
 function aspectRatioToOrientation(aspectRatio: string | undefined): HeyGenOrientation | undefined {
   const ar = normalizeOptionalString(aspectRatio);
   if (!ar) {
@@ -166,15 +182,18 @@ function buildCreateSessionBody(req: VideoGenerationRequest): Record<string, unk
     body.mode = mode;
   }
 
-  const avatarId = resolveProviderOption(opts, "avatar_id");
+  const avatarId =
+    resolveProviderOption(opts, "avatar_id") ?? resolveHeyGenConfigString(req, "defaultAvatarId");
   if (avatarId) {
     body.avatar_id = avatarId;
   }
-  const voiceId = resolveProviderOption(opts, "voice_id");
+  const voiceId =
+    resolveProviderOption(opts, "voice_id") ?? resolveHeyGenConfigString(req, "defaultVoiceId");
   if (voiceId) {
     body.voice_id = voiceId;
   }
-  const styleId = resolveProviderOption(opts, "style_id");
+  const styleId =
+    resolveProviderOption(opts, "style_id") ?? resolveHeyGenConfigString(req, "defaultStyleId");
   if (styleId) {
     body.style_id = styleId;
   }

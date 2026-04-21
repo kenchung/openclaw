@@ -105,8 +105,23 @@ Example:
       },
     },
   },
+  models: {
+    providers: {
+      heygen: {
+        // Optional: skip per-request avatar_id / voice_id / style_id
+        // when you always use the same presenter.
+        defaultAvatarId: "1e8adb28118944a3a7a8042656f275ed",
+        defaultVoiceId:  "JB4iKi8Nm2bJl2rrG8ht",
+        defaultStyleId:  "style_corporate_brief",
+      },
+    },
+  },
 }
 ```
+
+Per-request `providerOptions.avatar_id` / `voice_id` / `style_id` override the
+config defaults when set. If neither is set, the field is omitted and HeyGen
+falls back to the workspace default presenter (or errors).
 
 ## Advanced notes
 

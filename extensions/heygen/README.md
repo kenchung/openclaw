@@ -42,6 +42,20 @@ Get a key from the [HeyGen API settings page](https://app.heygen.com/settings/ap
 openclaw config set agents.defaults.videoGenerationModel.primary "heygen/video_agent_v3"
 ```
 
+## Set a default avatar / voice (optional)
+
+Skip the per-request `avatar_id` / `voice_id` when you always use the same presenter:
+
+```bash
+openclaw config set models.providers.heygen.defaultAvatarId "1e8adb28118944a3a7a8042656f275ed"
+openclaw config set models.providers.heygen.defaultVoiceId  "JB4iKi8Nm2bJl2rrG8ht"
+openclaw config set models.providers.heygen.defaultStyleId  "style_corporate_brief"
+```
+
+Per-request `providerOptions.avatar_id` / `voice_id` / `style_id` override the config defaults when set. If neither is set, the field is omitted and HeyGen falls back to the workspace default presenter (or errors).
+
+Need an avatar id? Run the [`heygen-avatar`](https://github.com/openclaw/skills) skill to upload a photo, create a HeyGen avatar via the Avatar V pipeline, and capture the `avatar_id` + `voice_id` pair. Paste into the config block above.
+
 ## Usage
 
 ```ts
