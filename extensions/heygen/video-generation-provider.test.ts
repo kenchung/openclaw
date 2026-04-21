@@ -28,7 +28,9 @@ function mockCreateSession(params: {
         data: {
           session_id: params.sessionId ?? "sess_abc",
           status: params.status ?? "generating",
-          video_id: params.videoId ?? "vid_xyz",
+          // Use explicit undefined check so callers can pass `null` to simulate
+          // a create response where video_id is not yet assigned.
+          video_id: params.videoId === undefined ? "vid_xyz" : params.videoId,
           created_at: 1_700_000_000,
         },
       }),
