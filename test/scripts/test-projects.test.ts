@@ -44,6 +44,22 @@ describe("scripts/test-projects changed-target routing", () => {
     });
   });
 
+  it("keeps extension batch runner edits on extension script tests", () => {
+    expect(resolveChangedTestTargetPlan(["scripts/test-extension-batch.mjs"])).toEqual({
+      mode: "targets",
+      targets: ["test/scripts/test-extension.test.ts"],
+    });
+  });
+
+  it("does not route live tests through the normal changed-test lane", () => {
+    expect(
+      resolveChangedTestTargetPlan(["src/gateway/gateway-codex-harness.live.test.ts"]),
+    ).toEqual({
+      mode: "targets",
+      targets: [],
+    });
+  });
+
   it("routes changed extension vitest configs to their own shard", () => {
     expect(
       buildVitestRunPlans(["--changed", "origin/main"], process.cwd(), () => [
@@ -54,6 +70,28 @@ describe("scripts/test-projects changed-target routing", () => {
         config: "test/vitest/vitest.extension-discord.config.ts",
         forwardedArgs: [],
         includePatterns: null,
+        watchMode: false,
+      },
+    ]);
+  });
+
+  it("routes contract roots to separate contract shards", () => {
+    const plans = buildVitestRunPlans([
+      "src/channels/plugins/contracts/channel-catalog.contract.test.ts",
+      "src/plugins/contracts/loader.contract.test.ts",
+    ]);
+
+    expect(plans).toEqual([
+      {
+        config: "test/vitest/vitest.contracts-channel-surface.config.ts",
+        forwardedArgs: [],
+        includePatterns: ["src/channels/plugins/contracts/channel-catalog.contract.test.ts"],
+        watchMode: false,
+      },
+      {
+        config: "test/vitest/vitest.contracts-plugin.config.ts",
+        forwardedArgs: [],
+        includePatterns: ["src/plugins/contracts/loader.contract.test.ts"],
         watchMode: false,
       },
     ]);
@@ -128,6 +166,21 @@ describe("scripts/test-projects changed-target routing", () => {
         config: "test/vitest/vitest.extension-providers.config.ts",
         forwardedArgs: [],
         includePatterns: ["extensions/lmstudio/src/**/*.test.ts"],
+        watchMode: false,
+      },
+    ]);
+  });
+
+  it("routes QA extension changes to the QA extension lane", () => {
+    const plans = buildVitestRunPlans(["--changed", "origin/main"], process.cwd(), () => [
+      "extensions/qa-lab/src/scenario-catalog.test.ts",
+    ]);
+
+    expect(plans).toEqual([
+      {
+        config: "test/vitest/vitest.extension-qa.config.ts",
+        forwardedArgs: [],
+        includePatterns: ["extensions/qa-lab/src/scenario-catalog.test.ts"],
         watchMode: false,
       },
     ]);
@@ -567,7 +620,11 @@ describe("scripts/test-projects full-suite sharding", () => {
       "test/vitest/vitest.unit-support.config.ts",
       "test/vitest/vitest.boundary.config.ts",
       "test/vitest/vitest.tooling.config.ts",
-      "test/vitest/vitest.contracts.config.ts",
+      "test/vitest/vitest.contracts-channel-surface.config.ts",
+      "test/vitest/vitest.contracts-channel-config.config.ts",
+      "test/vitest/vitest.contracts-channel-registry.config.ts",
+      "test/vitest/vitest.contracts-channel-session.config.ts",
+      "test/vitest/vitest.contracts-plugin.config.ts",
       "test/vitest/vitest.bundled.config.ts",
       "test/vitest/vitest.infra.config.ts",
       "test/vitest/vitest.hooks.config.ts",

@@ -1226,6 +1226,7 @@
                   "tools/pdf",
                   "tools/reactions",
                   "tools/thinking",
+                  "tools/tokenjuice",
                   "tools/video-generation"
                 ]
               },
@@ -1271,6 +1272,7 @@
                   "providers/glm",
                   "providers/google",
                   "providers/groq",
+                  "providers/heygen",
                   "providers/huggingface",
                   "providers/inferrs",
                   "providers/kilocode",
@@ -1292,6 +1294,7 @@
                   "providers/sglang",
                   "providers/stepfun",
                   "providers/synthetic",
+                  "providers/tencent",
                   "providers/together",
                   "providers/venice",
                   "providers/vercel-ai-gateway",

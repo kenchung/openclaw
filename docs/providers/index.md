@@ -32,8 +32,8 @@ Looking for chat channel docs (WhatsApp/Telegram/Discord/Slack/Mattermost (plugi
 - [Arcee AI (Trinity models)](/providers/arcee)
 - [BytePlus (International)](/concepts/model-providers#byteplus-international)
 - [Chutes](/providers/chutes)
-- [ComfyUI](/providers/comfy)
 - [Cloudflare AI Gateway](/providers/cloudflare-ai-gateway)
+- [ComfyUI](/providers/comfy)
 - [DeepSeek](/providers/deepseek)
 - [fal](/providers/fal)
 - [Fireworks](/providers/fireworks)
@@ -41,6 +41,7 @@ Looking for chat channel docs (WhatsApp/Telegram/Discord/Slack/Mattermost (plugi
 - [GLM models](/providers/glm)
 - [Google (Gemini)](/providers/google)
 - [Groq (LPU inference)](/providers/groq)
+- [HeyGen (avatar video generation)](/providers/heygen)
 - [Hugging Face (Inference)](/providers/huggingface)
 - [inferrs (local models)](/providers/inferrs)
 - [Kilocode](/providers/kilocode)
@@ -65,9 +66,9 @@ Looking for chat channel docs (WhatsApp/Telegram/Discord/Slack/Mattermost (plugi
 - [Together AI](/providers/together)
 - [Venice (Venice AI, privacy-focused)](/providers/venice)
 - [Vercel AI Gateway](/providers/vercel-ai-gateway)
-- [Vydra](/providers/vydra)
 - [vLLM (local models)](/providers/vllm)
 - [Volcengine (Doubao)](/providers/volcengine)
+- [Vydra](/providers/vydra)
 - [xAI](/providers/xai)
 - [Xiaomi](/providers/xiaomi)
 - [Z.AI](/providers/zai)
@@ -82,6 +83,7 @@ Looking for chat channel docs (WhatsApp/Telegram/Discord/Slack/Mattermost (plugi
 ## Transcription providers
 
 - [Deepgram (audio transcription)](/providers/deepgram)
+- [xAI](/providers/xai#speech-to-text)
 
 ## Community tools
 

@@ -22,6 +22,7 @@ import {
   isProviderExtensionRoot,
   isProviderOpenAiExtensionRoot,
 } from "../test/vitest/vitest.extension-provider-paths.mjs";
+import { isQaExtensionRoot } from "../test/vitest/vitest.extension-qa-paths.mjs";
 import { isTelegramExtensionRoot } from "../test/vitest/vitest.extension-telegram-paths.mjs";
 import { isVoiceCallExtensionRoot } from "../test/vitest/vitest.extension-voice-call-paths.mjs";
 import { isWhatsAppExtensionRoot } from "../test/vitest/vitest.extension-whatsapp-paths.mjs";
@@ -50,7 +51,15 @@ const CHANNEL_VITEST_CONFIG = "test/vitest/vitest.channels.config.ts";
 const CLI_VITEST_CONFIG = "test/vitest/vitest.cli.config.ts";
 const COMMANDS_LIGHT_VITEST_CONFIG = "test/vitest/vitest.commands-light.config.ts";
 const COMMANDS_VITEST_CONFIG = "test/vitest/vitest.commands.config.ts";
-const CONTRACTS_VITEST_CONFIG = "test/vitest/vitest.contracts.config.ts";
+const CONTRACTS_CHANNEL_CONFIG_VITEST_CONFIG =
+  "test/vitest/vitest.contracts-channel-config.config.ts";
+const CONTRACTS_CHANNEL_REGISTRY_VITEST_CONFIG =
+  "test/vitest/vitest.contracts-channel-registry.config.ts";
+const CONTRACTS_CHANNEL_SESSION_VITEST_CONFIG =
+  "test/vitest/vitest.contracts-channel-session.config.ts";
+const CONTRACTS_CHANNEL_SURFACE_VITEST_CONFIG =
+  "test/vitest/vitest.contracts-channel-surface.config.ts";
+const CONTRACTS_PLUGIN_VITEST_CONFIG = "test/vitest/vitest.contracts-plugin.config.ts";
 const CRON_VITEST_CONFIG = "test/vitest/vitest.cron.config.ts";
 const DAEMON_VITEST_CONFIG = "test/vitest/vitest.daemon.config.ts";
 const E2E_VITEST_CONFIG = "test/vitest/vitest.e2e.config.ts";
@@ -71,6 +80,7 @@ const EXTENSION_MESSAGING_VITEST_CONFIG = "test/vitest/vitest.extension-messagin
 const EXTENSION_PROVIDER_OPENAI_VITEST_CONFIG =
   "test/vitest/vitest.extension-provider-openai.config.ts";
 const EXTENSION_PROVIDERS_VITEST_CONFIG = "test/vitest/vitest.extension-providers.config.ts";
+const EXTENSION_QA_VITEST_CONFIG = "test/vitest/vitest.extension-qa.config.ts";
 const EXTENSION_SIGNAL_VITEST_CONFIG = "test/vitest/vitest.extension-signal.config.ts";
 const EXTENSION_SLACK_VITEST_CONFIG = "test/vitest/vitest.extension-slack.config.ts";
 const EXTENSION_TELEGRAM_VITEST_CONFIG = "test/vitest/vitest.extension-telegram.config.ts";
@@ -112,7 +122,11 @@ const VITEST_CONFIG_BY_KIND = {
   cli: CLI_VITEST_CONFIG,
   command: COMMANDS_VITEST_CONFIG,
   commandLight: COMMANDS_LIGHT_VITEST_CONFIG,
-  contracts: CONTRACTS_VITEST_CONFIG,
+  contractsChannelConfig: CONTRACTS_CHANNEL_CONFIG_VITEST_CONFIG,
+  contractsChannelRegistry: CONTRACTS_CHANNEL_REGISTRY_VITEST_CONFIG,
+  contractsChannelSession: CONTRACTS_CHANNEL_SESSION_VITEST_CONFIG,
+  contractsChannelSurface: CONTRACTS_CHANNEL_SURFACE_VITEST_CONFIG,
+  contractsPlugin: CONTRACTS_PLUGIN_VITEST_CONFIG,
   cron: CRON_VITEST_CONFIG,
   daemon: DAEMON_VITEST_CONFIG,
   e2e: E2E_VITEST_CONFIG,
@@ -134,6 +148,7 @@ const VITEST_CONFIG_BY_KIND = {
   extensionMsTeams: EXTENSION_MSTEAMS_VITEST_CONFIG,
   extensionProviderOpenAi: EXTENSION_PROVIDER_OPENAI_VITEST_CONFIG,
   extensionProvider: EXTENSION_PROVIDERS_VITEST_CONFIG,
+  extensionQa: EXTENSION_QA_VITEST_CONFIG,
   extensionSignal: EXTENSION_SIGNAL_VITEST_CONFIG,
   extensionSlack: EXTENSION_SLACK_VITEST_CONFIG,
   extensionTelegram: EXTENSION_TELEGRAM_VITEST_CONFIG,
@@ -177,6 +192,9 @@ const TOOLING_SOURCE_TEST_TARGETS = new Map([
     "scripts/run-vitest.mjs",
     ["test/scripts/test-projects.test.ts", "test/scripts/vitest-local-scheduling.test.ts"],
   ],
+  ["scripts/test-extension-batch.mjs", ["test/scripts/test-extension.test.ts"]],
+  ["scripts/lib/extension-test-plan.mjs", ["test/scripts/test-extension.test.ts"]],
+  ["scripts/lib/vitest-batch-runner.mjs", ["test/scripts/test-extension.test.ts"]],
   ["scripts/test-projects.mjs", ["test/scripts/test-projects.test.ts"]],
   ["scripts/test-projects.test-support.d.mts", ["test/scripts/test-projects.test.ts"]],
   ["scripts/test-projects.test-support.mjs", ["test/scripts/test-projects.test.ts"]],
@@ -189,9 +207,56 @@ const TOOLING_TEST_TARGETS = new Map([
     ["test/scripts/vitest-local-scheduling.test.ts"],
   ],
 ]);
+const GENERATED_CHANGED_TEST_TARGETS = new Set([
+  "src/canvas-host/a2ui/.bundle.hash",
+  "src/canvas-host/a2ui/a2ui.bundle.js",
+]);
 const VITEST_CONFIG_TARGET_KIND_BY_PATH = new Map(
   Object.entries(VITEST_CONFIG_BY_KIND).map(([kind, config]) => [config, kind]),
 );
+const CHANNEL_CONTRACT_CONFIG_PATTERNS = new Map([
+  [
+    CONTRACTS_CHANNEL_SURFACE_VITEST_CONFIG,
+    [
+      "src/channels/plugins/contracts/channel-catalog.contract.test.ts",
+      "src/channels/plugins/contracts/channel-import-guardrails.test.ts",
+      "src/channels/plugins/contracts/group-policy.fallback.contract.test.ts",
+      "src/channels/plugins/contracts/outbound-payload.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-a.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-e.contract.test.ts",
+    ],
+  ],
+  [
+    CONTRACTS_CHANNEL_CONFIG_VITEST_CONFIG,
+    [
+      "src/channels/plugins/contracts/plugins-core.authorize-config-write.policy.contract.test.ts",
+      "src/channels/plugins/contracts/plugins-core.authorize-config-write.targets.contract.test.ts",
+      "src/channels/plugins/contracts/plugins-core.catalog.entries.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-b.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-f.contract.test.ts",
+    ],
+  ],
+  [
+    CONTRACTS_CHANNEL_REGISTRY_VITEST_CONFIG,
+    [
+      "src/channels/plugins/contracts/plugins-core.catalog.paths.contract.test.ts",
+      "src/channels/plugins/contracts/plugins-core.loader.contract.test.ts",
+      "src/channels/plugins/contracts/plugins-core.registry.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-c.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-g.contract.test.ts",
+    ],
+  ],
+  [
+    CONTRACTS_CHANNEL_SESSION_VITEST_CONFIG,
+    [
+      "src/channels/plugins/contracts/plugins-core.resolve-config-writes.contract.test.ts",
+      "src/channels/plugins/contracts/registry.contract.test.ts",
+      "src/channels/plugins/contracts/session-binding.registry-backed.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-d.contract.test.ts",
+      "src/channels/plugins/contracts/*-shard-h.contract.test.ts",
+    ],
+  ],
+]);
 
 function normalizePathPattern(value) {
   return value.replaceAll("\\", "/");
@@ -254,6 +319,54 @@ function resolveVitestConfigTargetKind(relative) {
 
 function isVitestConfigTargetForKind(kind, targetArg, cwd) {
   return resolveVitestConfigTargetKind(toRepoRelativeTarget(targetArg, cwd)) === kind;
+}
+
+function resolveChannelContractTargetKind(relative) {
+  if (!relative.startsWith("src/channels/plugins/contracts/")) {
+    return null;
+  }
+  const name = path.posix.basename(relative);
+  if (/-shard-[ae]\.contract\.test\.ts$/u.test(name)) {
+    return "contractsChannelSurface";
+  }
+  if (/-shard-[bf]\.contract\.test\.ts$/u.test(name)) {
+    return "contractsChannelConfig";
+  }
+  if (/-shard-[cg]\.contract\.test\.ts$/u.test(name)) {
+    return "contractsChannelRegistry";
+  }
+  if (/-shard-[dh]\.contract\.test\.ts$/u.test(name)) {
+    return "contractsChannelSession";
+  }
+  if (
+    [
+      "channel-catalog.contract.test.ts",
+      "channel-import-guardrails.test.ts",
+      "group-policy.fallback.contract.test.ts",
+      "outbound-payload.contract.test.ts",
+    ].includes(name)
+  ) {
+    return "contractsChannelSurface";
+  }
+  if (
+    [
+      "plugins-core.authorize-config-write.policy.contract.test.ts",
+      "plugins-core.authorize-config-write.targets.contract.test.ts",
+      "plugins-core.catalog.entries.contract.test.ts",
+    ].includes(name)
+  ) {
+    return "contractsChannelConfig";
+  }
+  if (
+    [
+      "plugins-core.catalog.paths.contract.test.ts",
+      "plugins-core.loader.contract.test.ts",
+      "plugins-core.registry.contract.test.ts",
+    ].includes(name)
+  ) {
+    return "contractsChannelRegistry";
+  }
+  return "contractsChannelSession";
 }
 
 function listChangedPathsFromGit(baseRef, cwd) {
@@ -344,6 +457,12 @@ function resolveToolingChangedTestTargets(changedPaths) {
 }
 
 function isRoutableChangedTarget(changedPath) {
+  if (GENERATED_CHANGED_TEST_TARGETS.has(changedPath)) {
+    return false;
+  }
+  if (changedPath.endsWith(".live.test.ts")) {
+    return false;
+  }
   return /^(?:src|test|extensions|ui|packages)(?:\/|$)/u.test(changedPath);
 }
 
@@ -424,6 +543,9 @@ function classifyTarget(arg, cwd) {
     if (isProviderOpenAiExtensionRoot(extensionRoot)) {
       return "extensionProviderOpenAi";
     }
+    if (isQaExtensionRoot(extensionRoot)) {
+      return "extensionQa";
+    }
     if (isChannelSurfaceTestFile(relative)) {
       return "extensionChannel";
     }
@@ -471,6 +593,13 @@ function classifyTarget(arg, cwd) {
     }
     return isProviderExtensionRoot(extensionRoot) ? "extensionProvider" : "extension";
   }
+  const channelContractKind = resolveChannelContractTargetKind(relative);
+  if (channelContractKind) {
+    return channelContractKind;
+  }
+  if (relative.startsWith("src/plugins/contracts/")) {
+    return "contractsPlugin";
+  }
   if (isChannelSurfaceTestFile(relative)) {
     return "channel";
   }
@@ -480,16 +609,11 @@ function classifyTarget(arg, cwd) {
   if (
     relative.startsWith("test/") ||
     relative.startsWith("src/scripts/") ||
-    relative.startsWith("src/plugins/contracts/") ||
-    relative.startsWith("src/channels/plugins/contracts/") ||
     relative === "src/config/doc-baseline.integration.test.ts" ||
     relative === "src/config/schema.base.generated.test.ts" ||
     relative === "src/config/schema.help.quality.test.ts"
   ) {
-    return relative.startsWith("src/plugins/contracts/") ||
-      relative.startsWith("src/channels/plugins/contracts/")
-      ? "contracts"
-      : "tooling";
+    return "tooling";
   }
   if (isBundledPluginDependentUnitTestFile(relative)) {
     return "bundled";
@@ -669,7 +793,11 @@ export function buildVitestRunPlans(
     "default",
     "boundary",
     "tooling",
-    "contracts",
+    "contractsChannelSurface",
+    "contractsChannelConfig",
+    "contractsChannelRegistry",
+    "contractsChannelSession",
+    "contractsPlugin",
     "bundled",
     "gateway",
     "hooks",
@@ -718,6 +846,7 @@ export function buildVitestRunPlans(
     "extensionMessaging",
     "extensionProviderOpenAi",
     "extensionProvider",
+    "extensionQa",
     "extensionSignal",
     "extensionSlack",
     "extensionFull",
@@ -887,7 +1016,8 @@ export function applyParallelVitestCachePaths(specs, params = {}) {
 
 export function createVitestRunSpecs(args, params = {}) {
   const cwd = params.cwd ?? process.cwd();
-  const plans = buildVitestRunPlans(args, cwd);
+  const baseEnv = params.baseEnv ?? process.env;
+  const plans = filterPlansForContractIncludeFile(buildVitestRunPlans(args, cwd), baseEnv);
   return plans.map((plan, index) => {
     const includeFilePath = plan.includePatterns
       ? path.join(
@@ -899,15 +1029,49 @@ export function createVitestRunSpecs(args, params = {}) {
       config: plan.config,
       env: includeFilePath
         ? {
-            ...(params.baseEnv ?? process.env),
+            ...baseEnv,
             [INCLUDE_FILE_ENV_KEY]: includeFilePath,
           }
-        : (params.baseEnv ?? process.env),
+        : baseEnv,
       includeFilePath,
       includePatterns: plan.includePatterns,
       pnpmArgs: createVitestArgs(plan),
       watchMode: plan.watchMode,
     };
+  });
+}
+
+function loadIncludePatternsForSpecFilter(env) {
+  const filePath = env[INCLUDE_FILE_ENV_KEY]?.trim();
+  if (!filePath) {
+    return null;
+  }
+  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  return parsed.filter((value) => typeof value === "string" && value.length > 0);
+}
+
+function includePatternMatchesConfig(candidate, configPatterns) {
+  return configPatterns.some(
+    (pattern) => path.matchesGlob(candidate, pattern) || path.matchesGlob(pattern, candidate),
+  );
+}
+
+function filterPlansForContractIncludeFile(plans, env) {
+  const includePatterns = loadIncludePatternsForSpecFilter(env);
+  if (!includePatterns) {
+    return plans;
+  }
+  return plans.filter((plan) => {
+    const configPatterns = CHANNEL_CONTRACT_CONFIG_PATTERNS.get(plan.config);
+    if (!configPatterns) {
+      return true;
+    }
+    return includePatterns.some((candidate) =>
+      includePatternMatchesConfig(candidate, configPatterns),
+    );
   });
 }
 
